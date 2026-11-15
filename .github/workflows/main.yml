@@ -1,0 +1,55 @@
+name: 刷步数
+on:
+  workflow_dispatch:
+  schedule:
+    # UTC时间，对应北京时间 03:00、05:00、07:00
+    - cron: '0 19,21,23 * * *'
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Shanghai
+      CONFIG: ${{ secrets.CONFIG }}
+      PAT: ${{ secrets.PAT }}
+      AES_KEY: ${{ secrets.AES_KEY }}
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.PAT }}
+
+      - name: 判断今日是否已经执行成功
+        id: check_flag
+        run: |
+          TODAY=$(date +%Y-%m-%d)
+          FLAG=$(cat run_flag 2>/dev/null || echo "")
+          if [ "$FLAG" = "$TODAY" ]; then
+            echo "already_run=true" >> $GITHUB_OUTPUT
+            echo "✅ 今日已经成功执行过，本次跳过"
+            exit 0
+          else
+            echo "already_run=false" >> $GITHUB_OUTPUT
+            echo "✅ 今日还未执行，继续运行脚本"
+          fi
+
+      - name: 安装Python依赖
+        if: steps.check_flag.outputs.already_run == 'false'
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 运行脚本
+        if: steps.check_flag.outputs.already_run == 'false'
+        run: python3 main.py
+
+      - name: 写入当日成功标记
+        if: steps.check_flag.outputs.already_run == 'false'
+        run: |
+          TODAY=$(date +%Y-%m-%d)
+          echo $TODAY > run_flag
+          git config user.name github-actions
+          git config user.email github-actions@users.noreply.github.com
+          git add run_flag
+          git commit -m "标记今日已执行: $TODAY" || echo "run_flag无变化"
+          git push origin main
